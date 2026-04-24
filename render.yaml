@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: autonomous-report-system-api
+    runtime: python
+    healthCheckPath: /health
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: reports-disk
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: REPORT_OUTPUT_DIR
+        value: /var/data/reports
+      - key: DATABASE_PATH
+        value: /var/data/app.db
+      - key: PROMPT_CACHE_PATH
+        value: /var/data/prompt_cache.db
+
+  - type: web
+    name: autonomous-report-system-ui
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start -- --hostname 0.0.0.0 --port $PORT
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE_URL
+        sync: false
