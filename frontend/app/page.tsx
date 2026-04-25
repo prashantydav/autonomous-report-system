@@ -1,5 +1,5 @@
-import { ChatShell } from "../components/chat-shell";
+import { PortfolioStudio } from "../components/portfolio-studio";
 
 export default function Page() {
-  return <ChatShell />;
+  return <PortfolioStudio />;
 }

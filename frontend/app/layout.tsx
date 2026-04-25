@@ -2,8 +2,8 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Autonomous Research System",
-  description: "Chat-style interface for autonomous research and report generation",
+  title: "AI Portfolio & Resume Generator",
+  description: "Resume upload, portfolio generation, resume regeneration, and direct Vercel deployment.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
