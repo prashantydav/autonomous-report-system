@@ -1,17 +1,29 @@
 from __future__ import annotations
 
 from autonomous_report_system.agents import (
+    CREWAI_AGENT_ROLES,
     AnalystAgent,
     CriticAgent,
     EditorAgent,
     ResearcherAgent,
     WriterAgent,
-    build_crewai_agents,
 )
 from autonomous_report_system.config import Settings
-from autonomous_report_system.llm import LLMClient, PromptCache
+from autonomous_report_system.llm import CompositePromptCache, LLMClient, PromptCache, PromptCacheBackend, RedisPromptCache
 from autonomous_report_system.models import FinalReport
 from autonomous_report_system.research import TavilyResearchClient, dedupe_sources, run_parallel_searches
+
+
+def build_prompt_cache(settings: Settings) -> PromptCacheBackend | None:
+    if settings.prompt_cache_backend == "none":
+        return None
+    sqlite_cache = PromptCache(settings.prompt_cache_path)
+    if settings.prompt_cache_backend == "sqlite":
+        return sqlite_cache
+    if settings.redis_url and settings.prompt_cache_backend in {"auto", "redis"}:
+        redis_cache = RedisPromptCache(settings.redis_url, ttl_seconds=settings.prompt_cache_ttl_seconds)
+        return CompositePromptCache(redis_cache, fallback=sqlite_cache)
+    return sqlite_cache
 
 
 class ReportPipeline:
@@ -24,10 +36,10 @@ class ReportPipeline:
 
         self.llm = LLMClient(
             model=self.settings.openai_model,
-            prompt_cache=PromptCache(self.settings.prompt_cache_path),
+            prompt_cache=build_prompt_cache(self.settings),
         )
         self.tavily = TavilyResearchClient(api_key=self.settings.tavily_api_key)
-        self.crewai_agents = build_crewai_agents()
+        self.crewai_agent_roles = CREWAI_AGENT_ROLES
 
     def run(self, topic: str) -> FinalReport:
         researcher = ResearcherAgent(
@@ -38,7 +50,7 @@ class ReportPipeline:
         )
         analyst = AnalystAgent(self.llm)
         critic = CriticAgent(self.llm)
-        writer = WriterAgent(self.llm)
+        writer = WriterAgent(self.llm, max_workers=self.settings.max_llm_workers)
         editor = EditorAgent(self.llm)
 
         brief = researcher.run(topic)
@@ -70,7 +82,7 @@ class ReportPipeline:
             metadata={
                 "source_count": len(brief.sources),
                 "search_queries": brief.search_queries,
-                "crewai_agent_roles": [getattr(agent, "role", "") for agent in self.crewai_agents],
+                "crewai_agent_roles": self.crewai_agent_roles,
                 "critic_approved": critique.approved,
             },
         )

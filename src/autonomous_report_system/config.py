@@ -15,15 +15,20 @@ class Settings:
     output_dir: Path
     database_path: Path
     prompt_cache_path: Path
+    prompt_cache_backend: str
+    redis_url: str | None
+    prompt_cache_ttl_seconds: int | None
     cors_allow_origins: list[str]
     max_sources: int
     max_search_workers: int
     max_job_workers: int
+    max_llm_workers: int
 
     @classmethod
     def from_env(cls) -> "Settings":
         load_dotenv()
         cors_raw = os.getenv("CORS_ALLOW_ORIGINS", "*")
+        cache_ttl = os.getenv("PROMPT_CACHE_TTL_SECONDS")
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             tavily_api_key=os.getenv("TAVILY_API_KEY"),
@@ -31,8 +36,12 @@ class Settings:
             output_dir=Path(os.getenv("REPORT_OUTPUT_DIR", "reports")),
             database_path=Path(os.getenv("DATABASE_PATH", "data/app.db")),
             prompt_cache_path=Path(os.getenv("PROMPT_CACHE_PATH", "data/prompt_cache.db")),
+            prompt_cache_backend=os.getenv("PROMPT_CACHE_BACKEND", "auto").lower(),
+            redis_url=os.getenv("REDIS_URL"),
+            prompt_cache_ttl_seconds=int(cache_ttl) if cache_ttl else None,
             cors_allow_origins=[item.strip() for item in cors_raw.split(",") if item.strip()] or ["*"],
             max_sources=int(os.getenv("MAX_SOURCES", "24")),
             max_search_workers=int(os.getenv("MAX_SEARCH_WORKERS", "6")),
             max_job_workers=int(os.getenv("MAX_JOB_WORKERS", "4")),
+            max_llm_workers=int(os.getenv("MAX_LLM_WORKERS", "4")),
         )

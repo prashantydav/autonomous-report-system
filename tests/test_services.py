@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from autonomous_report_system.llm import PromptCache
+from autonomous_report_system.llm import CompositePromptCache, PromptCache
 from autonomous_report_system.storage import Storage
 
 
@@ -21,6 +21,24 @@ def test_prompt_cache_round_trip() -> None:
     try:
         cache = PromptCache(temp_dir / "cache.db")
         assert cache.get("gpt-test", "sys", "usr") is None
+        cache.set("gpt-test", "sys", "usr", '{"ok": true}')
+        assert cache.get("gpt-test", "sys", "usr") == '{"ok": true}'
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_composite_prompt_cache_falls_back_when_primary_fails() -> None:
+    class FailingCache:
+        def get(self, model: str, system_prompt: str, user_prompt: str) -> str | None:
+            raise RuntimeError("primary unavailable")
+
+        def set(self, model: str, system_prompt: str, user_prompt: str, response_text: str) -> None:
+            raise RuntimeError("primary unavailable")
+
+    temp_dir = make_temp_dir()
+    try:
+        fallback = PromptCache(temp_dir / "cache.db")
+        cache = CompositePromptCache(FailingCache(), fallback=fallback)
         cache.set("gpt-test", "sys", "usr", '{"ok": true}')
         assert cache.get("gpt-test", "sys", "usr") == '{"ok": true}'
     finally:

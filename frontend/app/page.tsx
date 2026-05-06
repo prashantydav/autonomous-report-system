@@ -1,5 +1,5 @@
-import { PortfolioStudio } from "../components/portfolio-studio";
+import { ResearchChat } from "../components/research-chat";
 
 export default function Page() {
-  return <PortfolioStudio />;
+  return <ResearchChat />;
 }

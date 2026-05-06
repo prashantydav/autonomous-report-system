@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
-
-try:
-    from crewai import Agent
-except Exception:  # pragma: no cover - CrewAI can be absent in unit tests.
-    Agent = None  # type: ignore[assignment]
 
 from autonomous_report_system.llm import LLMClient
 from autonomous_report_system.models import Analysis, Claim, Critique, ReportDraft, ReportSection, ResearchBrief
 from autonomous_report_system.research import TavilyResearchClient, dedupe_sources, run_parallel_searches, source_digest
 
 
+CREWAI_AGENT_ROLES = ["Researcher", "Analyst", "Critic", "Writer", "Editor"]
+
+
 def build_crewai_agents() -> list[Any]:
-    if Agent is None:
+    try:
+        from crewai import Agent
+    except Exception:  # pragma: no cover - CrewAI can be absent in unit tests.
         return []
     return [
         Agent(role="Researcher", goal="Find diverse, high-quality sources for a topic.", backstory="Expert web researcher."),
@@ -99,26 +100,61 @@ class CriticAgent:
 
 
 class WriterAgent:
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, max_workers: int = 4) -> None:
         self.llm = llm
+        self.max_workers = max(1, max_workers)
 
     def run(self, brief: ResearchBrief, analysis: Analysis, critique: Critique) -> ReportDraft:
-        payload = self.llm.invoke_json(
-            "You are a senior research writer. Draft a professional 10-page style report in concise prose.",
+        outline_payload = self.llm.invoke_json(
+            "You are a senior research writer. Plan a professional report before drafting it.",
             (
                 f"Topic: {brief.topic}\n"
                 f"Analysis:\n{analysis.model_dump_json()}\n"
                 f"Critique:\n{critique.model_dump_json(by_alias=True)}\n"
-                f"Sources:\n{source_digest(brief.sources, 1000)}\n\n"
-                "Draft a structured report. Use citation markers like [1] inline for claims. "
-                "Target a professional report with executive summary, findings, evidence, risks, recommendations, and conclusion.\n"
-                '{"title":"...","executive_summary":"...","sections":[{"heading":"...","body":"..."}]}'
+                "Create a compact report outline with 5-7 sections. Include section briefs that identify the evidence, "
+                "risks, recommendations, and conclusion coverage needed. Do not draft full sections yet.\n"
+                '{"title":"...","executive_summary":"...","sections":[{"heading":"...","brief":"..."}]}'
             ),
         )
+        outline_sections = [section for section in outline_payload.get("sections", []) if isinstance(section, dict)]
+        if not outline_sections:
+            outline_sections = [
+                {"heading": "Findings", "brief": "Summarize the most important evidence-backed findings."},
+                {"heading": "Risks", "brief": "Explain major risks and uncertainties."},
+                {"heading": "Recommendations", "brief": "Give practical recommendations grounded in the evidence."},
+                {"heading": "Conclusion", "brief": "Conclude the report with the strongest supported implications."},
+            ]
+
+        def draft_section(index: int, section: dict[str, Any]) -> tuple[int, ReportSection]:
+            heading = str(section.get("heading") or f"Section {index + 1}")
+            section_brief = str(section.get("brief") or "")
+            payload = self.llm.invoke_json(
+                "You are a senior research writer. Draft one report section with citation markers.",
+                (
+                    f"Topic: {brief.topic}\n"
+                    f"Section heading: {heading}\n"
+                    f"Section brief: {section_brief}\n"
+                    f"Analysis:\n{analysis.model_dump_json()}\n"
+                    f"Critique:\n{critique.model_dump_json(by_alias=True)}\n"
+                    f"Sources:\n{source_digest(brief.sources, 1000)}\n\n"
+                    "Draft only this section. Use concise professional prose and inline citation markers like [1]. "
+                    "Do not introduce facts that are not supported by the provided sources.\n"
+                    '{"heading":"...","body":"..."}'
+                ),
+            )
+            return index, ReportSection(heading=str(payload.get("heading") or heading), body=str(payload.get("body") or ""))
+
+        sections: list[ReportSection | None] = [None] * len(outline_sections)
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(outline_sections))) as executor:
+            futures = [executor.submit(draft_section, index, section) for index, section in enumerate(outline_sections)]
+            for future in as_completed(futures):
+                index, section = future.result()
+                sections[index] = section
+
         return ReportDraft(
-            title=str(payload.get("title") or brief.topic),
-            executive_summary=str(payload.get("executive_summary") or ""),
-            sections=[ReportSection(**section) for section in payload.get("sections", []) if isinstance(section, dict)],
+            title=str(outline_payload.get("title") or brief.topic),
+            executive_summary=str(outline_payload.get("executive_summary") or ""),
+            sections=[section for section in sections if section is not None],
             citations=brief.sources,
         )
 

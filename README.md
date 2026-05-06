@@ -1,94 +1,77 @@
-# AI Portfolio & Resume Generator
+# Autonomous Research Report System
 
-This project now ships a Next.js App Router frontend that turns a resume into a portfolio website and a regenerated resume variant, then deploys the generated portfolio directly to Vercel.
+FastAPI and Next.js application for generating professional research reports through a five-agent workflow:
 
-## Flow
+1. Researcher gathers source evidence.
+2. Analyst synthesizes patterns and supported claims.
+3. Critic checks evidence quality and can trigger re-research.
+4. Writer drafts report sections concurrently.
+5. Editor polishes the final report and preserves citations.
 
-1. Upload `PDF`, `DOCX`, or `TXT`
-2. Parse the resume into structured data
-3. Generate portfolio-ready copy using only resume content
-4. Preview and edit the generated portfolio
-5. Export the regenerated resume text
-6. Deploy a static portfolio bundle to Vercel
+The frontend is a ChatGPT-style interface for sessions, job progress, agent status, and downloadable report artifacts.
 
-## Frontend Stack
+## Performance
 
-- Next.js 15 App Router
-- React 19
-- Framer Motion
-- `pdf-parse` and `mammoth` for resume extraction
-- OpenAI Responses API with a strict JSON schema when `OPENAI_API_KEY` is set
-- Deterministic no-hallucination fallback generation when no OpenAI key is present
+- Tavily searches run in parallel through `MAX_SEARCH_WORKERS`.
+- Multiple report jobs run concurrently through `MAX_JOB_WORKERS`.
+- Report sections are drafted concurrently through `MAX_LLM_WORKERS`.
+- Prompt responses are cached before LLM calls. Set `REDIS_URL` to use Redis as the primary shared cache with SQLite as a local fallback.
+- CrewAI is imported lazily so API startup does not pay that cost until agent-role metadata is needed.
 
-## Key Features
-
-- Resume upload for `PDF`, `DOCX`, and `TXT`
-- Structured extraction for name, contact info, skills, experience, projects, and education
-- Portfolio generation with templates: `minimal`, `ai-engineer`, `freelancer`, `modern`
-- Resume regeneration into a cleaner downloadable variant
-- Animated hero, skill grouping, project filters, expandable cards, timeline experience, theme toggle, smooth scroll, contact form, and resume download
-- Direct Vercel deployment through the Vercel API
-
-## Environment Variables
-
-Frontend runtime:
+## Environment
 
 ```bash
 OPENAI_API_KEY=...
+TAVILY_API_KEY=...
+
 OPENAI_MODEL=gpt-4.1-mini
-VERCEL_ACCESS_TOKEN=...
-VERCEL_PROJECT_NAME=
-VERCEL_TEAM_ID=
-VERCEL_TEAM_SLUG=
+REPORT_OUTPUT_DIR=reports
+MAX_SOURCES=24
+MAX_SEARCH_WORKERS=6
+MAX_JOB_WORKERS=4
+MAX_LLM_WORKERS=4
+
+PROMPT_CACHE_BACKEND=auto
+PROMPT_CACHE_PATH=data/prompt_cache.db
+REDIS_URL=redis://localhost:6379/0
+PROMPT_CACHE_TTL_SECONDS=604800
 ```
 
-Notes:
-
-- `OPENAI_API_KEY` is optional. If it is missing, the app still generates a portfolio using deterministic rewriting based only on parsed resume data.
-- `VERCEL_ACCESS_TOKEN` is required for the deploy button.
-- `VERCEL_PROJECT_NAME` is optional. If omitted, the deploy route uses the requested site name or a slug derived from the resume name.
-- `VERCEL_TEAM_ID` or `VERCEL_TEAM_SLUG` is optional and only needed when deploying into a Vercel team instead of a personal account.
+`PROMPT_CACHE_BACKEND` accepts `auto`, `redis`, `sqlite`, or `none`. In `auto`, Redis is used only when `REDIS_URL` is present; SQLite remains the fallback cache.
 
 ## Local Run
 
+Backend:
+
 ```bash
-cd autonomous-report-system/frontend
+python -m pip --python .venv\Scripts\python.exe install -r requirements.txt
+.venv\Scripts\python.exe main.py --serve --host 127.0.0.1 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
 npm install
-cmd /c npm run dev
+npm.cmd run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-Open `http://localhost:3000`.
+Open `http://127.0.0.1:3000`.
 
-## Production Check
+## API
 
-```bash
-cd autonomous-report-system/frontend
-cmd /c npm run build
-```
-
-## API Routes
-
-- `POST /api/resume/parse`
-- `POST /api/portfolio/generate`
-- `POST /api/deploy/vercel`
-
-## Vercel Deployment Behavior
-
-The deploy route generates a static bundle in memory:
-
-- `index.html`
-- `styles.css`
-- `script.js`
-- `resume.txt`
-- `_redirects`
-
-That bundle is uploaded through Vercel's deployment API as inline files, which keeps the deployment flow independent from a separate Next.js build pipeline for the generated portfolio site.
+- `GET /health`
+- `GET /sessions`
+- `POST /sessions`
+- `GET /sessions/{session_id}`
+- `POST /sessions/{session_id}/messages`
+- `GET /jobs/{job_id}`
+- `GET /messages/{message_id}/artifacts/{markdown|html|pdf}`
 
 ## Verification
 
-Verified locally with:
-
 ```bash
-cd autonomous-report-system/frontend
-cmd /c npm run build
+.venv\Scripts\python.exe -m pytest
+cd frontend
+npm.cmd run build
 ```
